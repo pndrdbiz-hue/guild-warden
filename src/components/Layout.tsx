@@ -1,10 +1,12 @@
 import { NavLink } from "react-router-dom";
-import { Settings, Users, Shield } from "lucide-react";
+import { Settings, Users, Shield, ScrollText } from "lucide-react";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const navItems = [
-    { to: "/", label: "Students", icon: Users },
+    { to: "/", label: "Dashboard", icon: Shield },
+    { to: "/students", label: "Students", icon: Users },
     { to: "/config", label: "Config", icon: Settings },
+    { to: "/logs", label: "Audit Logs", icon: ScrollText },
   ];
 
   return (

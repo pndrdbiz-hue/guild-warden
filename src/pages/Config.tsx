@@ -113,6 +113,11 @@ export default function Config() {
           <CardTitle>Verification Settings</CardTitle>
           <CardDescription>
             Select the channels and roles that the bot should use
+            {config.updated_at && (
+              <span className="block mt-2 text-xs">
+                Last updated: {new Date(config.updated_at).toLocaleString()}
+              </span>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">

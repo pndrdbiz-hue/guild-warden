@@ -13,12 +13,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function Students() {
   const { toast } = useToast();
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [actioningId, setActioningId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "pending" | "verified" | "rejected">("all");
 
   useEffect(() => {
     loadStudents();
@@ -46,24 +48,41 @@ export default function Students() {
     }
   };
 
-  const handleAction = async (discordId: string, approve: boolean) => {
+  const handleAction = async (discordId: string, approve: boolean, hNumber: string) => {
     setActioningId(discordId);
     try {
-      const { error } = await supabase
+      const timestamp = new Date().toISOString();
+      const action = approve ? "Approved" : "Rejected";
+      
+      // Update student
+      const { error: updateError } = await supabase
         .from("students")
         .update({
           verified: approve,
-          verified_at: new Date().toISOString(),
-          verified_by: "admin", // Replace with actual admin ID
-          notes: approve ? "Approved via dashboard" : "Rejected via dashboard",
+          verified_at: timestamp,
+          verified_by: "admin", // Replace with actual admin ID from auth
+          notes: approve ? "Approved via dashboard" : `Rejected by Admin at ${new Date().toLocaleString()}`,
         })
         .eq("discord_id", discordId);
 
-      if (error) throw error;
+      if (updateError) throw updateError;
+
+      // Log the action
+      const { error: logError } = await supabase
+        .from("audit_logs")
+        .insert({
+          action: action,
+          student_id: discordId,
+          h_number: hNumber,
+          performed_by: "admin", // Replace with actual admin email/id
+          performed_at: timestamp,
+        });
+
+      if (logError) console.error("Error logging action:", logError);
 
       toast({
-        title: approve ? "Student Approved" : "Student Rejected",
-        description: `Successfully ${approve ? "approved" : "rejected"} the student`,
+        title: `Student ${action}`,
+        description: `Successfully ${action.toLowerCase()} the student`,
       });
 
       loadStudents();
@@ -78,6 +97,16 @@ export default function Students() {
       setActioningId(null);
     }
   };
+
+  const filteredStudents = students.filter((student) => {
+    if (filter === "all") return true;
+    if (filter === "verified") return student.verified === true;
+    if (filter === "rejected") return student.verified === false && student.notes?.includes("Rejected");
+    if (filter === "pending") {
+      return !student.verified && !student.notes?.includes("Rejected");
+    }
+    return true;
+  });
 
   const formatDate = (date?: string) => {
     if (!date) return "-";
@@ -107,87 +136,123 @@ export default function Students() {
         </Button>
       </div>
 
-      <Card>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Discord ID</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>H-Number</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Submitted</TableHead>
-              <TableHead>Verified</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {students.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  No students found
-                </TableCell>
-              </TableRow>
-            ) : (
-              students.map((student) => (
-                <TableRow key={student.discord_id}>
-                  <TableCell className="font-mono text-sm">
-                    {student.discord_id}
-                  </TableCell>
-                  <TableCell>{student.email}</TableCell>
-                  <TableCell>{student.h_number}</TableCell>
-                  <TableCell>
-                    <Badge variant={student.verified ? "default" : "secondary"}>
-                      {student.verified ? "Verified" : "Pending"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {formatDate(student.submitted_at)}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {formatDate(student.verified_at)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex gap-2 justify-end">
-                      <Button
-                        size="sm"
-                        variant="default"
-                        onClick={() => handleAction(student.discord_id, true)}
-                        disabled={
-                          student.verified || actioningId === student.discord_id
-                        }
-                      >
-                        {actioningId === student.discord_id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <>
-                            <CheckCircle className="h-4 w-4 mr-1" />
-                            Approve
-                          </>
-                        )}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => handleAction(student.discord_id, false)}
-                        disabled={actioningId === student.discord_id}
-                      >
-                        {actioningId === student.discord_id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <>
-                            <XCircle className="h-4 w-4 mr-1" />
-                            Reject
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </TableCell>
+      <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="all">
+            All ({students.length})
+          </TabsTrigger>
+          <TabsTrigger value="pending">
+            Pending ({students.filter(s => !s.verified && !s.notes?.includes("Rejected")).length})
+          </TabsTrigger>
+          <TabsTrigger value="verified">
+            Verified ({students.filter(s => s.verified).length})
+          </TabsTrigger>
+          <TabsTrigger value="rejected">
+            Rejected ({students.filter(s => s.verified === false && s.notes?.includes("Rejected")).length})
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value={filter}>
+          <Card>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Discord ID</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>H-Number</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Submitted</TableHead>
+                  <TableHead>Verified</TableHead>
+                  <TableHead>Verified By</TableHead>
+                  <TableHead>Notes</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </Card>
+              </TableHeader>
+              <TableBody>
+                {filteredStudents.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center text-muted-foreground">
+                      No students found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredStudents.map((student) => {
+                    const isRejected = student.verified === false && student.notes?.includes("Rejected");
+                    const isPending = !student.verified && !isRejected;
+                    
+                    return (
+                      <TableRow key={student.discord_id}>
+                        <TableCell className="font-mono text-sm">
+                          {student.discord_id}
+                        </TableCell>
+                        <TableCell>{student.email}</TableCell>
+                        <TableCell className="font-semibold">{student.h_number}</TableCell>
+                        <TableCell>
+                          {student.verified ? (
+                            <Badge className="bg-green-500">Verified</Badge>
+                          ) : isRejected ? (
+                            <Badge variant="destructive">Rejected</Badge>
+                          ) : (
+                            <Badge variant="secondary">Pending</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatDate(student.submitted_at)}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatDate(student.verified_at)}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {student.verified_by || "-"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
+                          {student.notes || "-"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex gap-2 justify-end">
+                            <Button
+                              size="sm"
+                              variant="default"
+                              onClick={() => handleAction(student.discord_id, true, student.h_number)}
+                              disabled={
+                                student.verified || actioningId === student.discord_id
+                              }
+                            >
+                              {actioningId === student.discord_id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <CheckCircle className="h-4 w-4 mr-1" />
+                                  Approve
+                                </>
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => handleAction(student.discord_id, false, student.h_number)}
+                              disabled={actioningId === student.discord_id}
+                            >
+                              {actioningId === student.discord_id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <XCircle className="h-4 w-4 mr-1" />
+                                  Reject
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
